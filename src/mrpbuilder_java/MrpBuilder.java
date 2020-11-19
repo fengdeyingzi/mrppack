@@ -19,9 +19,9 @@ import com.xl.util.FileUtils;
 public class MrpBuilder {
 	
 	      byte[] Magic = new byte[4]; // [0:4]     固定标识'MRPG'
-	      int FileStart;  // [4:8]     文件头的长度+文件列表的长度-8
-	      int MrpTotalLen;  // [8:12]    mrp文件的总长度
-	      int MRPHeaderSize;  // [12:16]   文件头的长度，通常是240，如果有额外数据则需要加上额外数据的长度
+	      int FileStart;  // [4:8] 文件列表终点位置    文件头的长度+文件列表的长度-8
+	      int MrpTotalLen;  // [8:12] 文件列表起始位置   mrp文件的总长度
+	      int MRPHeaderSize = 240;  // [12:16]   文件头的长度，通常是240，如果有额外数据则需要加上额外数据的长度
 	      byte[] FileName = new byte[12]; // [16:28]   GB2312编码带'\0'
 	      byte[] DisplayName = new byte[24]; // [28:52]   GB2312编码带'\0'
 	      byte[] AuthStr = new byte[16]; // [52:68]   编译器的授权字符串的第2、4、8、9、11、12、1、7、6位字符重新组合的一个字符串
@@ -39,6 +39,7 @@ public class MrpBuilder {
 	      int ScreenHeight ; // [206:208]
 	      byte Plat  ; // [208:209] mtk/mstar填1，spr填2，其它填0
 	      byte[] Reserve3 = new byte[31]; // [209:240]
+	      
 	      ArrayList<FileItem> list_file;
 	      /*
 	       * display
@@ -50,10 +51,16 @@ public class MrpBuilder {
 	       * description
 	       */
 	      
-	    public static void main(String[] args) {
+	    public void main(String[] args) throws FileNotFoundException {
 			// 读取数据
-	    	String jsonPath = "pack.json";
-	    	File file = new File(jsonPath);
+	    	String jsonPath = "./pack.json";
+	    	File f = new File(this.getClass().getResource("/").getPath());
+	    	System.out.println(f);
+	    	File file = new File(f,jsonPath);
+	    	if(!file.exists()){
+	    		System.out.println("file not found");
+	    		System.exit(0);
+	    	}
 	    	String jsonText = "";
 	    	try {
 				 jsonText = readText(file, "UTF-8");
@@ -65,7 +72,7 @@ public class MrpBuilder {
 	    	Config config = new MrpBuilder().new Config();
 	    	config.Appid = jsonObject.optInt("appid");
 	    	config.DisplayName = jsonObject.optString("display");
-	    	config.path = jsonObject.optString("path");
+	    	config.path = new File(f, jsonObject.optString("path")).getPath();
 	    	config.FileName = jsonObject.optString("filename");
 	    	config.Version = jsonObject.optInt("version");
 	    	config.Vendor = jsonObject.optString("vendor");
@@ -75,31 +82,61 @@ public class MrpBuilder {
 	    	config.ScreenWidth = jsonObject.optInt("screen_width");
 	    	config.ScreenHeight = jsonObject.optInt("screen_height");
 	    	config.Plat = (byte)jsonObject.optInt("platform");
+	    	System.out.println("Vendor "+config.Vendor);
+	    	System.out.println("Desc "+config.Desc);
 	    	JSONArray filesarray = jsonObject.getJSONArray("files");
 	    	config.list_file = new ArrayList<MrpBuilder.FileItem>();
 	    	for(int i=0;i<filesarray.length();i++){
 	    		FileItem fileItem = new MrpBuilder().new FileItem();
 	    		String temp = filesarray.getString(i);
 	    		if(temp.indexOf("=")<0){
-	    			fileItem.path = temp;
+	    			fileItem.path = new File(f,temp).getPath();
 	    			fileItem.filename = FileUtils.getName(temp);
 	    		}
 	    		else{
 	    			String[] temp_items = temp.split("=");
-	    			fileItem.path = temp_items[0];
+	    			fileItem.path = new File(f, temp_items[0]).getPath() ;
 	    			fileItem.filename = FileUtils.getName(temp_items[1]);
 	    			
 	    		}
-	    		
+	    		config.list_file.add(fileItem);
 	    		
 	    	}
+	    	
+	    	int listLen = 0,dataLen = 0;
+	    	//计算offset
+	    	for(FileItem item:config.list_file){
+	    		try {
+					item.namesize = item.filename.getBytes("GBK").length;
+					if(!new File(item.path).exists()){
+						System.out.println("文件未找到："+item.path);
+					}
+					else{
+						item.len = (int)new File(item.path).length();
+					// 每个列表项中由文件名长度、文件名、文件偏移、文件长度、0 组成，数值都是uint32因此需要4*4
+					listLen += item.namesize+1 + 4*4;
+					dataLen += item.namesize+1 + 4*2 + item.len;
+					    
+					}
+					
+				} catch (UnsupportedEncodingException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    	}
+	    	// 第一个文件数据的开始位置
+	    	int filePos = MRPHeaderSize + listLen;
+	    	FileStart = filePos - 8 - 4; // 不明白为什么要减8，但是必需这样做
+	    	MrpTotalLen = MRPHeaderSize + listLen + dataLen;
+	    	//写入头
+	    	RandomAccessFile output = new RandomAccessFile(config.path, "rw");
 	    	try {
-	    		RandomAccessFile output = new RandomAccessFile(config.path, "rw");
+	    		
 				
 				output.write(getGBKBytes(config.Magic,4));
-				output.write(new byte[4]);
-				output.write(new byte[4]);
-				output.write(new byte[4]);
+				output.write(getIntByte(FileStart));
+				output.write(getIntByte(MrpTotalLen));
+				output.write(getIntByte(MRPHeaderSize));
 				output.write(getGBKBytes(config.FileName, 12));
 				output.write(getGBKBytes(config.DisplayName, 24));
 				output.write(getGBKBytes(config.AuthStr, 16));
@@ -108,13 +145,13 @@ public class MrpBuilder {
 				output.write(getIntByte(config.Flag));
 				output.write(getIntByte(config.BuilderVersion));
 				output.write(getIntByte(0));
-				output.write(getGBKBytes(config.Vendor, 40));
+				output.write(getGBKBytes(config.Vendor, 40)); //出品商
 				output.write(getGBKBytes(config.Desc, 64));
-				output.write(config.Appid);
-				output.write(config.Version);
-				output.write(getIntByte(0));
-				output.write(getIntByte(config.ScreenWidth));
-				output.write(getIntByte(config.ScreenHeight));
+				output.write(getBigIntByte(config.Appid) );
+				output.write(getBigIntByte(config.Version) ); //版本id 大端
+				output.write(getIntByte(0)); //
+				output.write(getShortByte(config.ScreenWidth));
+				output.write(getShortByte(config.ScreenHeight));
 				byte[] byte_plat = new byte[1];
 				byte_plat[0] = config.Plat;
 				output.write(byte_plat);
@@ -128,11 +165,55 @@ public class MrpBuilder {
 	    	catch (IOException e) {
 				// TODO: handle exception
 			}
-	    	//写入头
+	    	
 	    	
 	    	//写入文件列表
-	    	
-	    	//计算offset
+	    	for(FileItem item:config.list_file){
+	    		try {
+	    			// 每个文件数据由：文件名长度、文件名、文件大小组成，数值都是uint32因此需要4*2
+	    			filePos += item.namesize+1 + 4*2;
+	    			item.offset = filePos;
+	    			// 下一个文件数据的开始位置
+	    			filePos += item.len;
+					
+					output.write(getIntByte(item.namesize+1));
+					output.write(item.filename.getBytes("GBK"));
+					output.writeByte(0);
+					output.write(getIntByte(filePos));
+					output.write(getIntByte(item.len));
+					System.out.println("filename:"+item.path + "    "+filePos);
+					
+				} catch (UnsupportedEncodingException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    		catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    	}
+	    	//写入数据
+	    	for(FileItem item:config.list_file){
+	    		try {
+					output.write(getIntByte(item.namesize+1));
+					output.write(item.filename.getBytes("GBK"));
+					output.writeByte(0);
+					output.write(getIntByte(item.len));
+					FileInputStream input = new FileInputStream(new File(item.path));
+					byte[] temp_buf = new byte[item.len];
+					input.read(temp_buf);
+					input.close();
+					output.write(temp_buf);
+					
+				} catch (UnsupportedEncodingException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    		catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    	}
 	    	
 	    	
 		}
@@ -143,6 +224,22 @@ public class MrpBuilder {
 	    	bytes[1] = (byte) ((number>>8)&0xff);
 	    	bytes[2] = (byte) ((number>>16)&0xff);
 	    	bytes[3] = (byte) ((number>>24)&0xff);
+	    	return bytes;
+	    }
+	    
+	    public static byte[] getShortByte(int number){
+	    	byte[] bytes = new byte[2];
+	    	bytes[0] = (byte) (number&0xff);
+	    	bytes[1] = (byte) ((number>>8)&0xff);
+	    	return bytes;
+	    }
+	    
+	    public static byte[] getBigIntByte(int number){
+	    	byte[] bytes = new byte[4];
+	    	bytes[3] = (byte) (number&0xff);
+	    	bytes[2] = (byte) ((number>>8)&0xff);
+	    	bytes[1] = (byte) ((number>>16)&0xff);
+	    	bytes[0] = (byte) ((number>>24)&0xff);
 	    	return bytes;
 	    }
 	    
@@ -196,6 +293,7 @@ public class MrpBuilder {
 	    class FileItem{
 	    	String path;
 	    	String filename;
+	    	int namesize;
 	    	int offset;
 	    	int len;
 	    }
