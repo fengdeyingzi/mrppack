@@ -51,9 +51,10 @@ public class MrpBuilder {
 	       * description
 	       */
 	      
-	    public void main(String[] args) throws FileNotFoundException {
+	    public void main(String[] args) throws IOException {
 			// 读取数据
 	    	String jsonPath = "./pack.json";
+	    	if(args.length>0)jsonPath = args[0];
 	    	File f = new File(this.getClass().getResource("/").getPath());
 	    	System.out.println(f);
 	    	File file = new File(f,jsonPath);
@@ -72,8 +73,9 @@ public class MrpBuilder {
 	    	Config config = new MrpBuilder().new Config();
 	    	config.Appid = jsonObject.optInt("appid");
 	    	config.DisplayName = jsonObject.optString("display");
-	    	config.path = new File(f, jsonObject.optString("path")).getPath();
 	    	config.FileName = jsonObject.optString("filename");
+	    	config.path = new File(f, jsonObject.optString("path")).getPath();
+	    	if(config.path.length()==0)config.path = config.FileName;
 	    	config.Version = jsonObject.optInt("version");
 	    	config.Vendor = jsonObject.optString("vendor");
 	    	config.Desc = jsonObject.optString("description");
@@ -126,17 +128,18 @@ public class MrpBuilder {
 	    	}
 	    	// 第一个文件数据的开始位置
 	    	int filePos = MRPHeaderSize + listLen;
-	    	FileStart = filePos - 8 - 4; // 不明白为什么要减8，但是必需这样做
+	    	FileStart = filePos - 8; // 不明白为什么要减8，但是必需这样做
 	    	MrpTotalLen = MRPHeaderSize + listLen + dataLen;
 	    	//写入头
+	    	new File(config.path).delete();
 	    	RandomAccessFile output = new RandomAccessFile(config.path, "rw");
 	    	try {
 	    		
 				
 				output.write(getGBKBytes(config.Magic,4));
-				output.write(getIntByte(FileStart));
+				output.write(getIntByte(FileStart)); //文件列表终点位置
 				output.write(getIntByte(MrpTotalLen));
-				output.write(getIntByte(MRPHeaderSize));
+				output.write(getIntByte(MRPHeaderSize)); //文件列表起始位置
 				output.write(getGBKBytes(config.FileName, 12));
 				output.write(getGBKBytes(config.DisplayName, 24));
 				output.write(getGBKBytes(config.AuthStr, 16));
@@ -179,9 +182,10 @@ public class MrpBuilder {
 					output.write(getIntByte(item.namesize+1));
 					output.write(item.filename.getBytes("GBK"));
 					output.writeByte(0);
-					output.write(getIntByte(filePos));
+					output.write(getIntByte(item.offset));
 					output.write(getIntByte(item.len));
-					System.out.println("filename:"+item.path + "    "+filePos);
+					output.write(getIntByte(0));
+					System.out.println("filename:"+item.filename + "    pos="+filePos + " len="+item.len);
 					
 				} catch (UnsupportedEncodingException e) {
 					// TODO Auto-generated catch block
@@ -199,6 +203,8 @@ public class MrpBuilder {
 					output.write(item.filename.getBytes("GBK"));
 					output.writeByte(0);
 					output.write(getIntByte(item.len));
+					System.out.println("写入数据：位置："+output.length()+" offset:"+item.offset+ " len="+item.len);
+					output.seek(item.offset);
 					FileInputStream input = new FileInputStream(new File(item.path));
 					byte[] temp_buf = new byte[item.len];
 					input.read(temp_buf);
@@ -214,6 +220,8 @@ public class MrpBuilder {
 					e.printStackTrace();
 				}
 	    	}
+	    	output.close();
+	    	System.out.println("写入完成");
 	    	
 	    	
 		}
