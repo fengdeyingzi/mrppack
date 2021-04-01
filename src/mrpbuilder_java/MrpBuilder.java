@@ -139,7 +139,7 @@ public class MrpBuilder {
 				output.write(getGBKBytes(config.Magic,4));
 				output.write(getIntByte(FileStart)); //文件列表终点位置
 				output.write(getIntByte(MrpTotalLen));
-				output.write(getIntByte(MRPHeaderSize)); //文件列表起始位置
+				output.write(getIntByte(MRPHeaderSize)); //文件头长度
 				output.write(getGBKBytes(config.FileName, 12));
 				output.write(getGBKBytes(config.DisplayName, 24));
 				output.write(getGBKBytes(config.AuthStr, 16));
