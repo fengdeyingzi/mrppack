@@ -51,6 +51,147 @@ public class MrpBuilder {
 	       * description
 	       */
 	      
+	    //打包
+	    public void pack(Config config, ArrayList<File> list_file){
+	    	for(int i=0;i<list_file.size();i++){
+	    		FileItem fileItem = new MrpBuilder().new FileItem();
+	    		String temp = list_file.get(i).getPath();
+	    		
+	    			fileItem.path = list_file.get(i).getPath();
+	    			fileItem.filename = FileUtils.getName(temp);
+	    		
+	    		config.list_file.add(fileItem);
+	    		
+	    	}
+	    	
+	    	int listLen = 0,dataLen = 0;
+	    	//计算offset
+	    	for(FileItem item:config.list_file){
+	    		try {
+					item.namesize = item.filename.getBytes("GBK").length;
+					if(!new File(item.path).exists()){
+						System.out.println("文件未找到："+item.path);
+					}
+					else{
+						item.len = (int)new File(item.path).length();
+					// 每个列表项中由文件名长度、文件名、文件偏移、文件长度、0 组成，数值都是uint32因此需要4*4
+					listLen += item.namesize+1 + 4*4;
+					dataLen += item.namesize+1 + 4*2 + item.len;
+					    
+					}
+					
+				} catch (UnsupportedEncodingException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    	}
+	    	// 第一个文件数据的开始位置
+	    	int filePos = MRPHeaderSize + listLen;
+	    	FileStart = filePos - 8; // 不明白为什么要减8，但是必需这样做
+	    	MrpTotalLen = MRPHeaderSize + listLen + dataLen;
+	    	//写入头
+	    	new File(config.path).delete();
+	    	RandomAccessFile output = null;
+			try {
+				output = new RandomAccessFile(config.path, "rw");
+			} catch (FileNotFoundException e1) {
+				e1.printStackTrace();
+			}
+	    	try {
+	    		
+				
+				output.write(getGBKBytes(config.Magic,4));
+				output.write(getIntByte(FileStart)); //文件列表终点位置
+				output.write(getIntByte(MrpTotalLen));
+				output.write(getIntByte(MRPHeaderSize)); //文件头长度
+				output.write(getGBKBytes(config.FileName, 12));
+				output.write(getGBKBytes(config.DisplayName, 24));
+				output.write(getGBKBytes(config.AuthStr, 16));
+				output.write(getIntByte(config.Appid));
+				output.write(getIntByte(config.Version));
+				output.write(getIntByte(config.Flag));
+				output.write(getIntByte(config.BuilderVersion));
+				output.write(getIntByte(0));
+				output.write(getGBKBytes(config.Vendor, 40)); //出品商
+				output.write(getGBKBytes(config.Desc, 64));
+				output.write(getBigIntByte(config.Appid) );
+				output.write(getBigIntByte(config.Version) ); //版本id 大端
+				output.write(getIntByte(0)); //
+				output.write(getShortByte(config.ScreenWidth));
+				output.write(getShortByte(config.ScreenHeight));
+				byte[] byte_plat = new byte[1];
+				byte_plat[0] = config.Plat;
+				output.write(byte_plat);
+				output.write(getGBKBytes("", 31));
+				
+				
+			} catch (FileNotFoundException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+	    	catch (IOException e) {
+				// TODO: handle exception
+			}
+	    	
+	    	
+	    	//写入文件列表
+	    	for(FileItem item:config.list_file){
+	    		try {
+	    			// 每个文件数据由：文件名长度、文件名、文件大小组成，数值都是uint32因此需要4*2
+	    			filePos += item.namesize+1 + 4*2;
+	    			item.offset = filePos;
+	    			// 下一个文件数据的开始位置
+	    			filePos += item.len;
+					
+					output.write(getIntByte(item.namesize+1));
+					output.write(item.filename.getBytes("GBK"));
+					output.writeByte(0);
+					output.write(getIntByte(item.offset));
+					output.write(getIntByte(item.len));
+					output.write(getIntByte(0));
+					System.out.println("filename:"+item.filename + "    pos="+filePos + " len="+item.len);
+					
+				} catch (UnsupportedEncodingException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    		catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    	}
+	    	//写入数据
+	    	for(FileItem item:config.list_file){
+	    		try {
+					output.write(getIntByte(item.namesize+1));
+					output.write(item.filename.getBytes("GBK"));
+					output.writeByte(0);
+					output.write(getIntByte(item.len));
+					System.out.println("写入数据：位置："+output.length()+" offset:"+item.offset+ " len="+item.len);
+					output.seek(item.offset);
+					FileInputStream input = new FileInputStream(new File(item.path));
+					byte[] temp_buf = new byte[item.len];
+					input.read(temp_buf);
+					input.close();
+					output.write(temp_buf);
+					
+				} catch (UnsupportedEncodingException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    		catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+	    	}
+	    	try {
+				output.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+	    	System.out.println("写入完成");
+	    }
+	      
 	    public void main(String[] args) throws IOException {
 			// 读取数据
 	    	String jsonPath = "./pack.json";
@@ -298,7 +439,7 @@ public class MrpBuilder {
 		}
 	    
 	      
-	    class FileItem{
+	    public class FileItem{
 	    	String path;
 	    	String filename;
 	    	int namesize;
@@ -307,29 +448,29 @@ public class MrpBuilder {
 	    }
 	    
 	    public class Config{
-	    	  String path = "";
+	    	public String path = "";
 	    	  String Magic = "MRPG"; // [0:4]     固定标识'MRPG'
 		      int FileStart;  // [4:8]     文件头的长度+文件列表的长度-8
 		      int MrpTotalLen;  // [8:12]    mrp文件的总长度
 		      int MRPHeaderSize;  // [12:16]   文件头的长度，通常是240，如果有额外数据则需要加上额外数据的长度
-		      String FileName ; // [16:28]   GB2312编码带'\0'
-		      String DisplayName ; // [28:52]   GB2312编码带'\0'
-		      String AuthStr ; // [52:68]   编译器的授权字符串的第2、4、8、9、11、12、1、7、6位字符重新组合的一个字符串
-		      int  Appid; // [68:72]
-		      int  Version; // [72:76]
-		      int  Flag = 3; // [76:80]   第0位是显示标志， 1-2位是cpu性能要求，所以cpu取值范围是0-3只对展讯有效， 第3位是否是shell启动的标志，0表示start启动，1表示shell启动
-		      int  BuilderVersion = 10002; // [80:84]   应该是编译器的版本，从几个mrpbuilder看都是10002
+		      public String FileName ; // [16:28]   GB2312编码带'\0'
+		      public String DisplayName ; // [28:52]   GB2312编码带'\0'
+		      public String AuthStr ; // [52:68]   编译器的授权字符串的第2、4、8、9、11、12、1、7、6位字符重新组合的一个字符串
+		      public int  Appid; // [68:72]
+		      public int  Version; // [72:76]
+		      public int  Flag = 3; // [76:80]   第0位是显示标志， 1-2位是cpu性能要求，所以cpu取值范围是0-3只对展讯有效， 第3位是否是shell启动的标志，0表示start启动，1表示shell启动
+		      public int  BuilderVersion = 10002; // [80:84]   应该是编译器的版本，从几个mrpbuilder看都是10002
 		      int  Crc32; // [84:88]   整个文件计算crc后写回，计算时此字段的值为0
-		      String Vendor ; // [88:128]  GB2312编码带'\0' 供应商
-		      String Desc ; // [128:192] GB2312编码带'\0'
-		      int AppidBE ; // [192:196] 大端appid
-		      int VersionBE ; // [196:200] 大端version
-		      int Reserve2 ; // [200:204] 保留字段
-		      int ScreenWidth ; // [204:206] 在反编译的mrpbuilder中能看到有屏幕信息的字段，但是在斯凯提供的文档中并没有说明
-		      int ScreenHeight ; // [206:208]
-		      byte Plat = 1; // [208:209] mtk/mstar填1，spr填2，其它填0
+		      public String Vendor ; // [88:128]  GB2312编码带'\0' 供应商
+		      public String Desc ; // [128:192] GB2312编码带'\0'
+		      public int AppidBE ; // [192:196] 大端appid
+		      public int VersionBE ; // [196:200] 大端version
+		      public int Reserve2 ; // [200:204] 保留字段
+		      public int ScreenWidth ; // [204:206] 在反编译的mrpbuilder中能看到有屏幕信息的字段，但是在斯凯提供的文档中并没有说明
+		      public int ScreenHeight ; // [206:208]
+		      public byte Plat = 1; // [208:209] mtk/mstar填1，spr填2，其它填0
 		      byte[] Reserve3 = new byte[31]; // [209:240]
-		      ArrayList<FileItem> list_file;
+		      public ArrayList<FileItem> list_file;
 		      public Config() {
 			}
 	    }
